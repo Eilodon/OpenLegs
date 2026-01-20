@@ -209,6 +209,14 @@ class Runtime(FileEditRuntimeMixin):
                 f'Security analyzer {analyzer_cls.__name__} initialized for runtime {self.sid}'
             )
 
+        # EIDOLON: Initialize circuit breaker
+        from openhands.runtime.circuit_breaker import CircuitBreaker
+        self.circuit_breaker = CircuitBreaker(
+            failure_threshold=5,
+            recovery_timeout_secs=30,
+            half_open_permits=3,
+        )
+
     @property
     def runtime_initialized(self) -> bool:
         return self._runtime_initialized

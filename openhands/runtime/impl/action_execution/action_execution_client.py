@@ -80,6 +80,11 @@ class ActionExecutionClient(Runtime):
         git_provider_tokens: PROVIDER_TOKEN_TYPE | None = None,
     ):
         self.session = HttpSession()
+
+        # EIDOLON: Initialize safety monitor
+        from openhands.runtime.safety_monitor import SafetyMonitor
+        self.safety_monitor = SafetyMonitor()
+
         self.action_semaphore = threading.Semaphore(1)  # Ensure one action at a time
         self._runtime_closed: bool = False
         self._vscode_token: str | None = None  # initial dummy value
@@ -342,6 +347,22 @@ class ActionExecutionClient(Runtime):
             return obs
 
     def run(self, action: CmdRunAction) -> Observation:
+        # EIDOLON: Safety monitor check
+        if hasattr(self, 'safety_monitor'):
+            violation = self.safety_monitor.check_command(action.command)
+            if violation:
+                logger.error(f"Command blocked by safety monitor: {violation}")
+                return ErrorObservation(violation)
+
+        # EIDOLON: Circuit breaker check
+        if hasattr(self, 'circuit_breaker'):
+            op_name = f"cmd_run_{action.source}"
+            if self.circuit_breaker.is_open(op_name):
+                return ErrorObservation(
+                    f"Circuit breaker open for command execution. "
+                    "Too many recent failures."
+                )
+
         return self.send_action_for_execution(action)
 
     def run_ipython(self, action: IPythonRunCellAction) -> Observation:
