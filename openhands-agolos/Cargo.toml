@@ -1,13 +1,25 @@
 [package]
 name = "openhands-agolos"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "AGOLOS safety primitives for OpenHands: LTL Monitor, TraumaRegistry, Causal Debugger"
+description = "AGOLOS cognitive primitives for OpenHands: DAGMA causal reasoning, LTL Monitor, TraumaRegistry, HolographicMemory"
 license = "MIT"
 
 [lib]
 name = "openhands_agolos"
 crate-type = ["cdylib", "rlib"]
+
+# Feature flags for modular compilation
+[features]
+default = ["causal-dagma", "safety-core"]
+# Full DAGMA causal reasoning with warm start and counterfactuals
+causal-dagma = []
+# Holographic associative memory (FFT-based)
+memory-holographic = ["rustfft", "num-complex"]
+# Core safety primitives (LTL, Circuit Breaker, Trauma)
+safety-core = []
+# All cognitive modules
+full = ["causal-dagma", "memory-holographic", "safety-core"]
 
 [dependencies]
 # PyO3 for Python bindings
@@ -15,6 +27,10 @@ pyo3 = { version = "0.20", features = ["extension-module"] }
 
 # Math operations for DAGMA
 nalgebra = "0.32"
+
+# FFT for HolographicMemory (optional)
+rustfft = { version = "6.1", optional = true }
+num-complex = { version = "0.4", optional = true }
 
 # Hashing for trauma context
 blake3 = "1.5"
