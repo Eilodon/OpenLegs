@@ -220,6 +220,24 @@ class CodeActAgent(Agent):
         messages = self._get_messages(
             condensed_history, initial_user_message, forgotten_event_ids
         )
+
+        # S-Tier: Inject causal suggestion as system hint if available
+        causal_suggestion = state.extra_data.get('causal_suggestion')
+        if causal_suggestion:
+            from openhands.core.message import Message, TextContent
+            hint_message = Message(
+                role='system',
+                content=[TextContent(text=f"⚡ ANALYSIS HINT: {causal_suggestion}")],
+            )
+            # Insert after system message but before user messages
+            if len(messages) > 1:
+                messages.insert(1, hint_message)
+            else:
+                messages.append(hint_message)
+            logger.info(f'Injected causal suggestion into prompt')
+            # Clear after use
+            state.extra_data.pop('causal_suggestion', None)
+
         params: dict = {
             'messages': messages,
         }

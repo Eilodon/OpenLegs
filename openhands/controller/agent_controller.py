@@ -107,6 +107,20 @@ except ImportError:
     COGNITIVE_AVAILABLE = False
     enhance_agent = None
 
+# Causal feature extractor for DAGMA analysis
+try:
+    from openhands.memory.causal_feature_extractor import (
+        extract_features,
+        extract_current_state,
+        get_feature_names,
+    )
+    CAUSAL_EXTRACTOR_AVAILABLE = True
+except ImportError:
+    CAUSAL_EXTRACTOR_AVAILABLE = False
+    extract_features = None
+    extract_current_state = None
+    get_feature_names = None
+
 # note: RESUME is only available on web GUI
 TRAFFIC_CONTROL_REMINDER = (
     "Please click on resume button if you'd like to continue, or start a new task."
@@ -236,6 +250,47 @@ class AgentController:
                 logger.info("S-Tier: Cognitive capabilities enabled for agent")
             except Exception as e:
                 logger.warning(f"S-Tier: Failed to enable cognitive enhancement: {e}")
+
+        # S-Tier: Causal suggestion from analysis (stored for injection into LLM context)
+        self._causal_suggestion: str | None = None
+
+        # S-Tier: PolicySelector for Active Inference action selection
+        self._policy_selector = None
+        self._last_policy_action_type: str | None = None
+        try:
+            from openhands.controller.policy_selector import PolicySelector, POLICY_AVAILABLE
+            if POLICY_AVAILABLE:
+                self._policy_selector = PolicySelector()
+                logger.info("S-Tier: PolicySelector enabled")
+        except ImportError:
+            logger.debug("S-Tier: PolicySelector not available")
+
+        # S-Tier: TraumaMemory for 3-tier failure memory
+        self._trauma_memory = None
+        try:
+            from openhands.memory.trauma_memory import TraumaMemory, AGOLOS_AVAILABLE as TRAUMA_AVAILABLE
+            if TRAUMA_AVAILABLE:
+                project_id = self.id[:8] if self.id else "default"
+                self._trauma_memory = TraumaMemory(project_id=project_id)
+                logger.info(f"S-Tier: TraumaMemory enabled for project '{project_id}'")
+        except ImportError:
+            logger.debug("S-Tier: TraumaMemory not available")
+        except Exception as e:
+            logger.warning(f"S-Tier: Failed to init TraumaMemory: {e}")
+
+        # S-Tier: ExperienceBuffer and PatternMiner for learning
+        self._experience_buffer = None
+        self._pattern_miner = None
+        try:
+            from openhands.memory.experience_learning import (
+                ExperienceBuffer, PatternMiner, LEARNING_AVAILABLE
+            )
+            if LEARNING_AVAILABLE:
+                self._experience_buffer = ExperienceBuffer(max_size=1000)
+                self._pattern_miner = PatternMiner()
+                logger.info("S-Tier: ExperienceBuffer and PatternMiner enabled")
+        except ImportError:
+            logger.debug("S-Tier: Experience learning not available")
 
         # Add the system message to the event stream
         self._add_system_message()
@@ -600,10 +655,67 @@ class AgentController:
             log_level, str(observation_to_print), extra={'msg_type': 'OBSERVATION'}
         )
 
+        # S-Tier: Causal analysis for error observations
+        if isinstance(observation, ErrorObservation):
+            suggestion = await self._analyze_failure(observation)
+            if suggestion:
+                self._causal_suggestion = suggestion
+                self.log('info', f'⚡ Causal Analysis: {suggestion[:200]}...')
+
         # this happens for runnable actions and microagent actions
         if self._pending_action and self._pending_action.id == observation.cause:
             if self.state.agent_state == AgentState.AWAITING_USER_CONFIRMATION:
                 return
+
+            # S-Tier: Record outcome for PolicySelector learning
+            if self._policy_selector and self._last_policy_action_type:
+                is_success = not isinstance(observation, ErrorObservation)
+                self._policy_selector.record_outcome(self._last_policy_action_type, is_success)
+                self.log('debug',
+                    f'PolicySelector: Recorded {self._last_policy_action_type} outcome={is_success}'
+                )
+                self._last_policy_action_type = None
+
+            # S-Tier: Record failure in TraumaMemory for learning from mistakes
+            if self._trauma_memory and isinstance(observation, ErrorObservation):
+                try:
+                    from openhands.memory.trauma_memory import TraumaSeverity
+
+                    # Classify severity based on error content
+                    error_lower = observation.content.lower()
+                    if any(x in error_lower for x in ['rm -rf', 'drop table', 'permission denied']):
+                        severity = TraumaSeverity.SEVERE
+                    elif any(x in error_lower for x in ['build failed', 'syntax error', 'module not found']):
+                        severity = TraumaSeverity.MEDIUM
+                    else:
+                        severity = TraumaSeverity.LIGHT
+
+                    self._trauma_memory.record_failure(
+                        self._pending_action,
+                        observation.content[:200],
+                        severity
+                    )
+                    self.log('debug', f'TraumaMemory: Recorded {severity.name} trauma')
+                except Exception as e:
+                    self.log('debug', f'TraumaMemory record failed: {e}')
+
+            # S-Tier: Record experience for pattern learning
+            if self._experience_buffer or self._pattern_miner:
+                try:
+                    action_type = type(self._pending_action).__name__
+                    action_sig = str(self._pending_action)[:100]
+                    is_success = not isinstance(observation, ErrorObservation)
+                    reward = 1.0 if is_success else -0.5
+
+                    if self._experience_buffer:
+                        self._experience_buffer.push(action_type, action_sig, is_success, reward)
+
+                    if self._pattern_miner:
+                        self._pattern_miner.add_action(action_type, is_success, reward)
+
+                    self.log('debug', f'Learning: Recorded {action_type} success={is_success}')
+                except Exception as e:
+                    self.log('debug', f'Learning record failed: {e}')
 
             self._pending_action = None
 
@@ -612,6 +724,73 @@ class AgentController:
             if self.state.agent_state == AgentState.USER_REJECTED:
                 await self.set_agent_state_to(AgentState.AWAITING_USER_INPUT)
             return
+
+    async def _analyze_failure(self, observation: ErrorObservation) -> str | None:
+        """Analyze failure using Causal Analyzer and return suggestion.
+
+        This method extracts features from the event history and uses DAGMA
+        to identify the root cause of the failure.
+
+        Args:
+            observation: The error observation to analyze
+
+        Returns:
+            A suggestion string if analysis succeeds, None otherwise
+        """
+        # Check if causal analysis is available
+        if not CAUSAL_EXTRACTOR_AVAILABLE or extract_features is None:
+            return None
+
+        # Check if agent has causal analyzer
+        if not hasattr(self.agent, '_cognitive_analyzer') or self.agent._cognitive_analyzer is None:
+            return None
+
+        try:
+            # Extract features from recent history
+            features, feature_names = extract_features(self.state.history[-50:])
+
+            # Need minimum samples for meaningful analysis
+            MIN_SAMPLES = 10
+            if len(features) < MIN_SAMPLES:
+                self.log('debug', f'Causal analysis skipped: insufficient data ({len(features)}/{MIN_SAMPLES})')
+                return None
+
+            # Get current state as dict
+            current_state = extract_current_state(self.state.history)
+
+            # Set variable names for better suggestions
+            self.agent._cognitive_analyzer.set_variable_names(feature_names)
+
+            # Analyze with DAGMA
+            result = self.agent._cognitive_analyzer.analyze(features)
+
+            if result.confidence < 0.3:
+                self.log('debug', f'Causal analysis low confidence: {result.confidence:.1%}')
+                return None
+
+            # Format suggestion
+            root_cause_name = result.root_cause_variable or f"Variable {result.root_cause_index}"
+            suggestion = (
+                f"[Causal Analysis] Root cause: '{root_cause_name}' "
+                f"(confidence: {result.confidence:.0%}). "
+                f"{result.suggestion}"
+            )
+
+            # Store for memory
+            if hasattr(self.agent, '_cognitive_memory') and self.agent._cognitive_memory:
+                try:
+                    self.agent._cognitive_memory.store_experience(
+                        observation.content[:200],  # Error as context
+                        suggestion  # Analysis as solution
+                    )
+                except Exception:
+                    pass  # Don't fail if memory storage fails
+
+            return suggestion
+
+        except Exception as e:
+            self.log('warning', f'Causal analysis error: {e}')
+            return None
 
     async def _handle_message_action(self, action: MessageAction) -> None:
         """Handles message actions from the event stream.
@@ -953,10 +1132,68 @@ class AgentController:
             action = self._replay_manager.step()
         else:
             try:
+                # S-Tier: Inject causal suggestion into state for LLM context
+                if self._causal_suggestion:
+                    self.state.extra_data['causal_suggestion'] = self._causal_suggestion
+                    self.log('debug', f'Injecting causal suggestion into LLM context')
+                    # Clear after injection (one-shot)
+                    self._causal_suggestion = None
+
                 action = self.agent.step(self.state)
                 if action is None:
                     raise LLMNoActionError('No action was returned')
                 action._source = EventSource.AGENT  # type: ignore [attr-defined]
+
+                # S-Tier: PolicySelector evaluation for intelligent action filtering
+                if self._policy_selector and action.runnable:
+                    action_type = type(action).__name__
+                    # Heuristic: high goal alignment for runnable actions, uncertainty based on past success
+                    goal_alignment = 0.7  # Base assumption for agent-generated actions
+                    uncertainty = 1.0 - self._policy_selector.get_success_rate(action_type)
+
+                    decision = self._policy_selector.select_action(
+                        action_type, goal_alignment, uncertainty
+                    )
+
+                    self.log('debug',
+                        f'PolicySelector: {action_type} -> {decision.policy} '
+                        f'(EFE={decision.efe_value:.2f})'
+                    )
+
+                    # Store for outcome recording
+                    self._last_policy_action_type = action_type
+
+                    # Apply policy decision
+                    if decision.should_skip:
+                        self.log('info', f'PolicySelector: Skipping action {action_type} due to low goal alignment')
+                        return
+                    elif decision.requires_confirmation and not self.confirmation_mode:
+                        # Request confirmation for uncertain actions even without confirmation_mode
+                        if hasattr(action, 'confirmation_state'):
+                            action.confirmation_state = ActionConfirmationStatus.AWAITING_CONFIRMATION
+                            self.log('info', f'PolicySelector: Requesting confirmation for {action_type}')
+
+                # S-Tier: TraumaMemory check for past failures
+                if self._trauma_memory and action.runnable:
+                    try:
+                        fear_score, severity = self._trauma_memory.query_fear(action)
+                        if fear_score > 0:
+                            fear_msg = self._trauma_memory.get_fear_message(fear_score, severity)
+                            self.log('warning', f'TraumaMemory: {fear_msg}')
+
+                            # Inject trauma warning into causal suggestion
+                            if self._causal_suggestion:
+                                self._causal_suggestion = f"{fear_msg}\n{self._causal_suggestion}"
+                            else:
+                                self.state.extra_data['trauma_warning'] = fear_msg
+
+                            # SEVERE trauma requires confirmation
+                            if severity and severity.value >= 3:  # SEVERE
+                                if hasattr(action, 'confirmation_state'):
+                                    action.confirmation_state = ActionConfirmationStatus.AWAITING_CONFIRMATION
+                                    self.log('info', 'TraumaMemory: SEVERE trauma detected, requiring confirmation')
+                    except Exception as e:
+                        self.log('debug', f'TraumaMemory query failed: {e}')
             except (
                 LLMMalformedActionError,
                 LLMNoActionError,
