@@ -99,6 +99,22 @@ class CausalAnalyzer:
         n_vars = len(observations[0])
         n_samples = len(observations)
 
+        # SECURITY FIX: Require minimum samples for reliable causal inference
+        # DAGMA needs sufficient data points for meaningful DAG structure learning
+        MIN_SAMPLES_FOR_CAUSAL = 10
+        if n_samples < MIN_SAMPLES_FOR_CAUSAL:
+            logger.warning(
+                f"Insufficient samples for causal analysis: {n_samples} < {MIN_SAMPLES_FOR_CAUSAL}"
+            )
+            return CausalAnalysisResult(
+                root_cause_index=0,
+                root_cause_variable=self._variable_names[0] if self._variable_names else None,
+                confidence=0.0,
+                suggestion=f"Insufficient data for causal analysis (need {MIN_SAMPLES_FOR_CAUSAL}+ samples, got {n_samples})",
+                adjacency_matrix=[],
+                acyclicity_score=0.0,
+            )
+
         # Create DAGMA instance
         if self.mode == "adaptive":
             self._dagma = openhands_agolos.PyDagma.adaptive(n_vars, n_samples)

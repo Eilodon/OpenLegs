@@ -537,6 +537,302 @@ impl PyHolographicMemory {
 }
 
 // ============================================================================
+// Policy/EFE Calculator Python Bindings
+// ============================================================================
+
+#[pyclass]
+pub struct PyEFECalculator {
+    inner: EFECalculator,
+}
+
+#[pymethods]
+impl PyEFECalculator {
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: EFECalculator::default(),
+        }
+    }
+
+    #[staticmethod]
+    fn with_params(temperature: f32, epistemic_weight: f32) -> Self {
+        Self {
+            inner: EFECalculator::new(temperature, epistemic_weight),
+        }
+    }
+
+    /// Compute Expected Free Energy
+    fn compute_efe(&self, pragmatic: f32, epistemic: f32) -> f32 {
+        self.inner.compute_efe(pragmatic, epistemic)
+    }
+
+    /// Evaluate action and return policy recommendation
+    fn evaluate_action(
+        &self,
+        action_type: &str,
+        goal_alignment: f32,
+        uncertainty: f32,
+        past_success_rate: f32,
+    ) -> PyPolicyEvaluation {
+        let eval = self.inner.evaluate_action(action_type, goal_alignment, uncertainty, past_success_rate);
+        PyPolicyEvaluation {
+            policy: format!("{:?}", eval.policy),
+            efe_value: eval.efe,
+            pragmatic: eval.pragmatic_value,
+            epistemic: eval.epistemic_value,
+        }
+    }
+}
+
+#[pyclass]
+#[derive(Clone)]
+pub struct PyPolicyEvaluation {
+    #[pyo3(get)]
+    policy: String,
+    #[pyo3(get)]
+    efe_value: f32,
+    #[pyo3(get)]
+    pragmatic: f32,
+    #[pyo3(get)]
+    epistemic: f32,
+}
+
+#[pyclass]
+pub struct PyPolicySelector {
+    inner: std::cell::RefCell<PolicySelector>,
+}
+
+#[pymethods]
+impl PyPolicySelector {
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: std::cell::RefCell::new(PolicySelector::new()),
+        }
+    }
+
+    /// Select best policy for an action given goal alignment and uncertainty
+    fn select(&self, action_type: &str, goal_alignment: f32, uncertainty: f32) -> PyPolicyEvaluation {
+        let eval = self.inner.borrow().select(action_type, goal_alignment, uncertainty);
+        PyPolicyEvaluation {
+            policy: format!("{:?}", eval.policy),
+            efe_value: eval.efe,
+            pragmatic: eval.pragmatic_value,
+            epistemic: eval.epistemic_value,
+        }
+    }
+
+    /// Record action outcome for learning
+    fn record_outcome(&self, action_type: &str, success: bool) {
+        self.inner.borrow_mut().record_outcome(action_type, success);
+    }
+
+    /// Get success rate for action type
+    fn get_success_rate(&self, action_type: &str) -> f32 {
+        self.inner.borrow().get_success_rate(action_type)
+    }
+}
+
+// ============================================================================
+// Learning Module Python Bindings
+// ============================================================================
+
+#[pyclass]
+pub struct PyExperienceBuffer {
+    inner: std::cell::RefCell<ExperienceBuffer>,
+}
+
+#[pymethods]
+impl PyExperienceBuffer {
+    #[new]
+    fn new(max_size: usize) -> Self {
+        Self {
+            inner: std::cell::RefCell::new(ExperienceBuffer::new(max_size)),
+        }
+    }
+
+    /// Push a new experience
+    fn push(&self, action_type: &str, action_signature: &str, success: bool, reward: f32) {
+        let context_hash = [0u8; 32]; // Simplified - could compute from action
+        let exp = Experience::new(action_type, action_signature, context_hash, success, reward);
+        self.inner.borrow_mut().push(exp);
+    }
+
+    /// Get success rate for action type
+    fn success_rate(&self, action_type: &str) -> Option<f32> {
+        self.inner.borrow().success_rate(action_type)
+    }
+
+    /// Get buffer length
+    fn len(&self) -> usize {
+        self.inner.borrow().len()
+    }
+
+    /// Check if buffer is empty
+    fn is_empty(&self) -> bool {
+        self.inner.borrow().is_empty()
+    }
+}
+
+#[pyclass]
+pub struct PyPatternMiner {
+    inner: std::cell::RefCell<PatternMiner>,
+}
+
+#[pymethods]
+impl PyPatternMiner {
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: std::cell::RefCell::new(PatternMiner::default()),
+        }
+    }
+
+    #[staticmethod]
+    fn with_params(min_support: f32, max_pattern_length: usize) -> Self {
+        Self {
+            inner: std::cell::RefCell::new(PatternMiner::new(min_support, max_pattern_length)),
+        }
+    }
+
+    /// Add an action to the sequence buffer
+    fn add_action(&self, action_type: &str, success: bool, reward: f32) {
+        self.inner.borrow_mut().add_action(action_type, success, reward);
+    }
+
+    /// Suggest next action based on current sequence
+    fn suggest_next(&self, recent_actions: Vec<String>) -> Option<String> {
+        self.inner.borrow().suggest_next(&recent_actions).map(|s| s.to_string())
+    }
+
+    /// Get number of patterns discovered
+    fn pattern_count(&self) -> usize {
+        self.inner.borrow().pattern_count()
+    }
+}
+
+// ============================================================================
+// Decision Tree Python Bindings
+// ============================================================================
+
+#[pyclass]
+pub struct PyDecisionTree {
+    inner: DecisionTree,
+}
+
+#[pymethods]
+impl PyDecisionTree {
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: DecisionTree::default(),
+        }
+    }
+
+    /// Create default decision tree for OpenHands agent
+    #[staticmethod]
+    fn default_for_agent() -> Self {
+        Self {
+            inner: DecisionTree::default_for_agent(),
+        }
+    }
+
+    /// Make decision based on context
+    fn decide(&self, budget: f32, context: f32, confidence: f32, failures: u32, is_rate_limited: bool) -> PyDecisionResult {
+        let ctx = DecisionContext {
+            budget_remaining: budget,
+            context_usage: context,
+            confidence,
+            failure_count: failures,
+            is_rate_limited,
+            ..Default::default()
+        };
+        let result = self.inner.decide(&ctx);
+        PyDecisionResult {
+            action: format!("{:?}", result.action),
+            path: result.path_string(),
+        }
+    }
+}
+
+#[pyclass]
+#[derive(Clone)]
+pub struct PyDecisionResult {
+    #[pyo3(get)]
+    action: String,
+    #[pyo3(get)]
+    path: String,
+}
+
+// ============================================================================
+// LLM Provider Chain Python Bindings
+// ============================================================================
+
+#[pyclass]
+pub struct PyProviderChain {
+    inner: std::cell::RefCell<ProviderChain>,
+}
+
+#[pymethods]
+impl PyProviderChain {
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: std::cell::RefCell::new(ProviderChain::new()),
+        }
+    }
+
+    /// Create default chain with common providers
+    #[staticmethod]
+    fn default_chain() -> Self {
+        Self {
+            inner: std::cell::RefCell::new(ProviderChain::default_chain()),
+        }
+    }
+
+    /// Add a provider to the chain
+    fn add_provider(&self, name: &str, priority: u32, cost_per_token: f32, max_context: usize) {
+        let provider = LLMProvider::new(name, priority, cost_per_token, max_context);
+        self.inner.borrow_mut().add_provider(provider);
+    }
+
+    /// Get next available provider name
+    fn next_available(&self) -> Option<String> {
+        self.inner.borrow().next_available().map(|p| p.name.clone())
+    }
+
+    /// Record success for a provider
+    fn record_success(&self, provider_name: &str, latency_ms: u64) {
+        self.inner.borrow_mut().record_success(provider_name, latency_ms);
+    }
+
+    /// Record failure for a provider
+    fn record_failure(&self, provider_name: &str, error: &str, latency_ms: u64) {
+        self.inner.borrow_mut().record_failure(provider_name, error, latency_ms);
+    }
+
+    /// Mark provider as rate limited
+    fn mark_rate_limited(&self, provider_name: &str, duration_secs: u64) {
+        self.inner.borrow_mut().mark_rate_limited(provider_name, Duration::from_secs(duration_secs));
+    }
+
+    /// Get stats for a provider (error_rate, avg_latency_ms)
+    fn get_stats(&self, provider_name: &str) -> Option<(f32, f32)> {
+        self.inner.borrow().get_stats(provider_name)
+    }
+
+    /// Reset provider status for recovery
+    fn reset_provider(&self, provider_name: &str) {
+        self.inner.borrow_mut().reset_provider(provider_name);
+    }
+
+    /// Get all available provider names
+    fn available_providers(&self) -> Vec<String> {
+        self.inner.borrow().available_providers().iter().map(|p| p.name.clone()).collect()
+    }
+}
+
+// ============================================================================
 // Python Module Definition
 // ============================================================================
 
@@ -563,6 +859,22 @@ fn openhands_agolos(_py: Python, m: &PyModule) -> PyResult<()> {
     {
         m.add_class::<PyHolographicMemory>()?;
     }
+
+    // Policy/EFE Calculator
+    m.add_class::<PyEFECalculator>()?;
+    m.add_class::<PyPolicySelector>()?;
+    m.add_class::<PyPolicyEvaluation>()?;
+
+    // Learning Module
+    m.add_class::<PyExperienceBuffer>()?;
+    m.add_class::<PyPatternMiner>()?;
+
+    // Decision Tree
+    m.add_class::<PyDecisionTree>()?;
+    m.add_class::<PyDecisionResult>()?;
+
+    // LLM Provider Chain
+    m.add_class::<PyProviderChain>()?;
 
     Ok(())
 }

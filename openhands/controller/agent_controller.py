@@ -94,6 +94,19 @@ from openhands.runtime.runtime_status import RuntimeStatus
 from openhands.server.services.conversation_stats import ConversationStats
 from openhands.storage.files import FileStore
 
+# Circuit breaker and cognitive enhancement imports
+try:
+    from openhands.runtime.circuit_breaker import CircuitBreaker, CIRCUIT_BREAKER_AVAILABLE
+except ImportError:
+    CIRCUIT_BREAKER_AVAILABLE = False
+    CircuitBreaker = None
+
+try:
+    from openhands.controller.cognitive_enhancement import enhance_agent, COGNITIVE_AVAILABLE
+except ImportError:
+    COGNITIVE_AVAILABLE = False
+    enhance_agent = None
+
 # note: RESUME is only available on web GUI
 TRAFFIC_CONTROL_REMINDER = (
     "Please click on resume button if you'd like to continue, or start a new task."
@@ -207,6 +220,23 @@ class AgentController:
         # security analyzer for direct access
         self.security_analyzer = security_analyzer
 
+        # S-Tier Upgrade: Circuit Breaker for resilient operation execution
+        self._circuit_breaker = None
+        if CIRCUIT_BREAKER_AVAILABLE and CircuitBreaker is not None:
+            try:
+                self._circuit_breaker = CircuitBreaker()
+                logger.debug("S-Tier: CircuitBreaker enabled")
+            except Exception as e:
+                logger.warning(f"S-Tier: Failed to init CircuitBreaker: {e}")
+
+        # S-Tier Upgrade: Enable Cognitive Enhancement (Holographic Memory + Causal Analysis)
+        if COGNITIVE_AVAILABLE and enhance_agent is not None:
+            try:
+                enhance_agent(self.agent, enable_memory=True, enable_causal=True)
+                logger.info("S-Tier: Cognitive capabilities enabled for agent")
+            except Exception as e:
+                logger.warning(f"S-Tier: Failed to enable cognitive enhancement: {e}")
+
         # Add the system message to the event stream
         self._add_system_message()
 
@@ -242,13 +272,16 @@ class AgentController:
                 if hasattr(action, 'security_risk'):
                     action.security_risk = ActionSecurityRisk.UNKNOWN
         else:
-            # When no security analyzer is configured, treat all actions as UNKNOWN risk
+            # SECURITY FIX: When no security analyzer is configured, treat all actions as HIGH risk
             # This is a fail-safe approach that ensures confirmation is required
-            logger.debug(
-                f'No security analyzer configured, setting UNKNOWN risk for action: {action}'
+            # Changed from UNKNOWN (which was proceed) to HIGH (require confirmation)
+            logger.warning(
+                f'No security analyzer configured - treating as HIGH risk, requiring confirmation: {action}'
             )
             if hasattr(action, 'security_risk'):
-                action.security_risk = ActionSecurityRisk.UNKNOWN
+                action.security_risk = ActionSecurityRisk.HIGH
+            if hasattr(action, 'confirmation_state'):
+                action.confirmation_state = ActionConfirmationStatus.AWAITING_CONFIRMATION
 
     def _add_system_message(self):
         for event in self.event_stream.search_events(start_id=self.state.start_id):
@@ -377,8 +410,19 @@ class AgentController:
         asyncio.create_task(self._step_with_exception_handling())
 
     async def _step_with_exception_handling(self) -> None:
+        # S-Tier: Check circuit breaker before executing step
+        operation_key = f"agent_step_{self.id}"
+        if self._circuit_breaker and self._circuit_breaker.is_open(operation_key):
+            self.log('warning', f'Circuit breaker OPEN for {operation_key}, skipping step')
+            await self.set_agent_state_to(AgentState.ERROR)
+            self.state.last_error = "Too many consecutive failures - circuit breaker open"
+            return
+
         try:
             await self._step()
+            # S-Tier: Record success for circuit breaker
+            if self._circuit_breaker:
+                self._circuit_breaker.record_success(operation_key)
         except Exception as e:
             self.log(
                 'error',
@@ -405,6 +449,9 @@ class AgentController:
                     'warning',
                     f'Unknown exception type while running the agent: {type(e).__name__}.',
                 )
+            # S-Tier: Record failure for circuit breaker
+            if self._circuit_breaker:
+                self._circuit_breaker.record_failure(operation_key)
             await self._react_to_exception(reported)
 
     def should_step(self, event: Event) -> bool:

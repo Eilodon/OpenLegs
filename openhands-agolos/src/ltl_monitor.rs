@@ -57,6 +57,122 @@ impl LtlMonitor {
         monitor
     }
 
+    /// Normalize command to prevent bypass attempts via encoding/obfuscation.
+    ///
+    /// Handles:
+    /// - Extra whitespace (` rm  -rf  / ` → `rm -rf /`)
+    /// - Split flags (`-r -f` → `-rf`)
+    /// - Common shell escape patterns
+    /// - Quoted arguments that hide dangerous patterns
+    pub fn normalize_command(cmd: &str) -> String {
+        let mut result = String::with_capacity(cmd.len());
+        let mut prev_was_space = true;
+        let mut in_single_quote = false;
+        let mut in_double_quote = false;
+
+        // First pass: handle escape sequences and quotes
+        let mut chars = cmd.chars().peekable();
+        while let Some(c) = chars.next() {
+            match c {
+                // Handle backslash escapes
+                '\\' if !in_single_quote => {
+                    if let Some(&next) = chars.peek() {
+                        // Skip the backslash and add the raw character
+                        chars.next();
+                        result.push(next);
+                        prev_was_space = false;
+                    }
+                }
+                // Handle $'...' syntax (ANSI-C quoting)
+                '$' if !in_single_quote && !in_double_quote => {
+                    if chars.peek() == Some(&'\'') {
+                        chars.next(); // consume the quote
+                        // Parse ANSI-C quoted string
+                        while let Some(qc) = chars.next() {
+                            if qc == '\'' {
+                                break;
+                            } else if qc == '\\' {
+                                if let Some(&ec) = chars.peek() {
+                                    chars.next();
+                                    match ec {
+                                        'x' => {
+                                            // Hex escape \xNN
+                                            let mut hex = String::new();
+                                            for _ in 0..2 {
+                                                if let Some(&hc) = chars.peek() {
+                                                    if hc.is_ascii_hexdigit() {
+                                                        hex.push(hc);
+                                                        chars.next();
+                                                    }
+                                                }
+                                            }
+                                            if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                                                result.push(byte as char);
+                                            }
+                                        }
+                                        'n' => result.push('\n'),
+                                        't' => result.push('\t'),
+                                        'r' => result.push('\r'),
+                                        _ => result.push(ec),
+                                    }
+                                }
+                            } else {
+                                result.push(qc);
+                            }
+                        }
+                        prev_was_space = false;
+                    } else {
+                        result.push(c);
+                        prev_was_space = false;
+                    }
+                }
+                // Track quotes
+                '\'' if !in_double_quote => {
+                    in_single_quote = !in_single_quote;
+                }
+                '"' if !in_single_quote => {
+                    in_double_quote = !in_double_quote;
+                }
+                // Collapse whitespace
+                ' ' | '\t' if !in_single_quote && !in_double_quote => {
+                    if !prev_was_space {
+                        result.push(' ');
+                        prev_was_space = true;
+                    }
+                }
+                _ => {
+                    result.push(c);
+                    prev_was_space = false;
+                }
+            }
+        }
+
+        // Trim and normalize
+        let result = result.trim().to_string();
+
+        // Second pass: normalize common flag patterns
+        // -r -f → -rf (combine adjacent single-letter flags)
+        let mut normalized = result.clone();
+
+        // Handle split rm flags: "rm -r -f" → "rm -rf"
+        for pattern in &[
+            ("rm -r -f", "rm -rf"),
+            ("rm -f -r", "rm -rf"),
+            ("rm -R -f", "rm -Rf"),
+            ("rm -f -R", "rm -Rf"),
+            ("rm --recursive -f", "rm -rf"),
+            ("rm -f --recursive", "rm -rf"),
+            ("rm --force -r", "rm -rf"),
+            ("rm -r --force", "rm -rf"),
+            ("rm --recursive --force", "rm -rf"),
+            ("rm --force --recursive", "rm -rf"),
+        ] {
+            normalized = normalized.replace(pattern.0, pattern.1);
+        }
+
+        normalized
+    }
+
     /// Add default safety properties for bash commands
     fn add_default_properties(&mut self) {
         // P1: No recursive deletion of root or home
@@ -204,12 +320,18 @@ impl LtlMonitor {
         ));
     }
 
-    /// Check a command against all safety properties
+    /// Check a command against all safety properties.
+    ///
+    /// The command is first normalized to prevent bypass attempts
+    /// via encoding tricks, extra spaces, or split flags.
     pub fn check_command(&self, command: &str) -> Vec<SafetyViolation> {
+        // Normalize to prevent bypass attempts
+        let normalized = Self::normalize_command(command);
         let mut violations = Vec::new();
 
         for prop in &self.properties {
-            if !prop.check(command) {
+            // Check both original and normalized forms
+            if !prop.check(command) || !prop.check(&normalized) {
                 violations.push(SafetyViolation {
                     property_name: prop.name.clone(),
                     description: prop.description.clone(),
@@ -301,5 +423,65 @@ mod tests {
         );
         assert!(!monitor.is_safe("rm *.log"));
         assert!(monitor.is_safe("cat *.log"));
+    }
+
+    // ====== NORMALIZATION BYPASS TESTS ======
+
+    #[test]
+    fn test_normalization_extra_spaces() {
+        let cmd = "rm  -rf  /";
+        let normalized = LtlMonitor::normalize_command(cmd);
+        assert_eq!(normalized, "rm -rf /");
+    }
+
+    #[test]
+    fn test_normalization_split_flags() {
+        let cmd = "rm -r -f /";
+        let normalized = LtlMonitor::normalize_command(cmd);
+        assert_eq!(normalized, "rm -rf /");
+    }
+
+    #[test]
+    fn test_normalization_long_flags() {
+        let cmd = "rm --recursive --force /";
+        let normalized = LtlMonitor::normalize_command(cmd);
+        assert_eq!(normalized, "rm -rf /");
+    }
+
+    #[test]
+    fn test_bypass_extra_spaces_blocked() {
+        let monitor = LtlMonitor::new();
+        assert!(!monitor.is_safe("rm  -rf  /"));
+        assert!(!monitor.is_safe("  rm -rf /  "));
+    }
+
+    #[test]
+    fn test_bypass_split_flags_blocked() {
+        let monitor = LtlMonitor::new();
+        assert!(!monitor.is_safe("rm -r -f /"));
+        assert!(!monitor.is_safe("rm -f -r /"));
+    }
+
+    #[test]
+    fn test_bypass_long_flags_blocked() {
+        let monitor = LtlMonitor::new();
+        assert!(!monitor.is_safe("rm --recursive --force /"));
+        assert!(!monitor.is_safe("rm --force --recursive /"));
+    }
+
+    #[test]
+    fn test_bypass_hex_encoding_blocked() {
+        let monitor = LtlMonitor::new();
+        // $'\x72\x6d' is 'rm' in hex
+        assert!(!monitor.is_safe("$'\\x72\\x6d' -rf /"));
+    }
+
+    #[test]
+    fn test_safe_paths_still_allowed() {
+        let monitor = LtlMonitor::new();
+        // These should still be allowed
+        assert!(monitor.is_safe("rm -rf ./build"));
+        assert!(monitor.is_safe("rm  -rf  ./temp"));
+        assert!(monitor.is_safe("rm -r -f /tmp/test"));
     }
 }
