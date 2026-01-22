@@ -6,13 +6,14 @@ Provides DAGMA-based causal reasoning to understand:
 - What would happen if I used different parameters?
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 from openhands.core.logger import openhands_logger as logger
 
 # Try to import the Rust extension
 try:
     import openhands_agolos
+
     AGOLOS_AVAILABLE = True
     # Check if DAGMA feature is enabled
     DAGMA_AVAILABLE = hasattr(openhands_agolos, 'PyDagma')
@@ -51,7 +52,7 @@ class CausalAnalyzer:
     ```
     """
 
-    def __init__(self, mode: str = "adaptive"):
+    def __init__(self, mode: str = 'adaptive'):
         """Initialize causal analyzer.
 
         Args:
@@ -59,16 +60,16 @@ class CausalAnalyzer:
         """
         if not DAGMA_AVAILABLE:
             raise ImportError(
-                "PyDagma is not available. "
-                "Build with: cd openhands-agolos && maturin develop --features causal-dagma"
+                'PyDagma is not available. '
+                'Build with: cd openhands-agolos && maturin develop --features causal-dagma'
             )
 
         self.mode = mode
         self._dagma: Optional[openhands_agolos.PyDagma] = None
-        self._variable_names: List[str] = []
-        logger.debug(f"CausalAnalyzer initialized (mode={mode})")
+        self._variable_names: list[str] = []
+        logger.debug(f'CausalAnalyzer initialized (mode={mode})')
 
-    def set_variable_names(self, names: List[str]) -> None:
+    def set_variable_names(self, names: list[str]) -> None:
         """Set variable names for better reporting.
 
         Args:
@@ -76,7 +77,7 @@ class CausalAnalyzer:
         """
         self._variable_names = names
 
-    def analyze(self, observations: List[List[float]]) -> "CausalAnalysisResult":
+    def analyze(self, observations: list[list[float]]) -> 'CausalAnalysisResult':
         """Analyze observations to find root cause.
 
         Args:
@@ -91,7 +92,7 @@ class CausalAnalyzer:
                 root_cause_index=0,
                 root_cause_variable=None,
                 confidence=0.0,
-                suggestion="No data to analyze",
+                suggestion='No data to analyze',
                 adjacency_matrix=[],
                 acyclicity_score=0.0,
             )
@@ -104,21 +105,23 @@ class CausalAnalyzer:
         MIN_SAMPLES_FOR_CAUSAL = 10
         if n_samples < MIN_SAMPLES_FOR_CAUSAL:
             logger.warning(
-                f"Insufficient samples for causal analysis: {n_samples} < {MIN_SAMPLES_FOR_CAUSAL}"
+                f'Insufficient samples for causal analysis: {n_samples} < {MIN_SAMPLES_FOR_CAUSAL}'
             )
             return CausalAnalysisResult(
                 root_cause_index=0,
-                root_cause_variable=self._variable_names[0] if self._variable_names else None,
+                root_cause_variable=self._variable_names[0]
+                if self._variable_names
+                else None,
                 confidence=0.0,
-                suggestion=f"Insufficient data for causal analysis (need {MIN_SAMPLES_FOR_CAUSAL}+ samples, got {n_samples})",
+                suggestion=f'Insufficient data for causal analysis (need {MIN_SAMPLES_FOR_CAUSAL}+ samples, got {n_samples})',
                 adjacency_matrix=[],
                 acyclicity_score=0.0,
             )
 
         # Create DAGMA instance
-        if self.mode == "adaptive":
+        if self.mode == 'adaptive':
             self._dagma = openhands_agolos.PyDagma.adaptive(n_vars, n_samples)
-        elif self.mode == "fast":
+        elif self.mode == 'fast':
             self._dagma = openhands_agolos.PyDagma.fast(n_vars)
         else:
             self._dagma = openhands_agolos.PyDagma()
@@ -132,7 +135,9 @@ class CausalAnalyzer:
 
         # Get variable name if available
         root_cause_var = None
-        if self._variable_names and analysis.root_cause_index < len(self._variable_names):
+        if self._variable_names and analysis.root_cause_index < len(
+            self._variable_names
+        ):
             root_cause_var = self._variable_names[analysis.root_cause_index]
 
         return CausalAnalysisResult(
@@ -146,10 +151,10 @@ class CausalAnalyzer:
 
     def predict_intervention(
         self,
-        observations: List[List[float]],
+        observations: list[list[float]],
         variable_index: int,
         new_value: float,
-    ) -> List[float]:
+    ) -> list[float]:
         """Predict the effect of intervening on a variable.
 
         Answers counterfactual questions like:
@@ -175,7 +180,7 @@ class CausalAnalyzer:
 
     def explain_failure(
         self,
-        variables: Dict[str, float],
+        variables: dict[str, float],
         failure_variable: str,
     ) -> str:
         """Explain why a failure occurred.
@@ -201,11 +206,11 @@ class CausalAnalyzer:
         elif result.root_cause_variable:
             return (
                 f"'{failure_variable}' failed because '{result.root_cause_variable}' "
-                f"is the root cause (confidence: {result.confidence:.1%}). "
-                f"{result.suggestion}"
+                f'is the root cause (confidence: {result.confidence:.1%}). '
+                f'{result.suggestion}'
             )
         else:
-            return "Unable to determine root cause with available data."
+            return 'Unable to determine root cause with available data.'
 
 
 class CausalAnalysisResult:
@@ -217,7 +222,7 @@ class CausalAnalysisResult:
         root_cause_variable: Optional[str],
         confidence: float,
         suggestion: str,
-        adjacency_matrix: List[List[float]],
+        adjacency_matrix: list[list[float]],
         acyclicity_score: float,
     ):
         self.root_cause_index = root_cause_index
@@ -228,11 +233,11 @@ class CausalAnalysisResult:
         self.acyclicity_score = acyclicity_score
 
     def __repr__(self) -> str:
-        var = self.root_cause_variable or f"index:{self.root_cause_index}"
+        var = self.root_cause_variable or f'index:{self.root_cause_index}'
         return (
-            f"CausalAnalysisResult(root_cause={var}, "
-            f"confidence={self.confidence:.2f}, "
-            f"acyclicity={self.acyclicity_score:.2e})"
+            f'CausalAnalysisResult(root_cause={var}, '
+            f'confidence={self.confidence:.2f}, '
+            f'acyclicity={self.acyclicity_score:.2e})'
         )
 
 
@@ -240,7 +245,7 @@ class CausalAnalysisResult:
 def analyze_command_failure(
     command: str,
     error: str,
-    context: Dict[str, float],
+    context: dict[str, float],
 ) -> CausalAnalysisResult:
     """Analyze why a command failed.
 
@@ -253,9 +258,9 @@ def analyze_command_failure(
         CausalAnalysisResult with root cause analysis
     """
     if not DAGMA_AVAILABLE:
-        raise ImportError("DAGMA not available")
+        raise ImportError('DAGMA not available')
 
-    analyzer = CausalAnalyzer(mode="fast")
+    analyzer = CausalAnalyzer(mode='fast')
     analyzer.set_variable_names(list(context.keys()))
 
     # Single observation

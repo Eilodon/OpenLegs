@@ -211,6 +211,7 @@ class Runtime(FileEditRuntimeMixin):
 
         # EIDOLON: Initialize circuit breaker
         from openhands.runtime.circuit_breaker import CircuitBreaker
+
         self.circuit_breaker = CircuitBreaker(
             failure_threshold=5,
             recovery_timeout_secs=30,

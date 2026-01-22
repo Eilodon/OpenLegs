@@ -2,11 +2,13 @@
 
 Provides LTL-based runtime verification of safety properties.
 """
+
 import logging
 from typing import Optional
 
 try:
     from openhands_agolos import PyLtlMonitor
+
     LTL_MONITOR_AVAILABLE = True
 except ImportError:
     LTL_MONITOR_AVAILABLE = False
@@ -25,8 +27,8 @@ class SafetyMonitor:
         """Initialize safety monitor with default rules."""
         if not LTL_MONITOR_AVAILABLE:
             logger.warning(
-                "openhands_agolos not available. Safety monitor disabled. "
-                "Build with: cd openhands-agolos && maturin develop"
+                'openhands_agolos not available. Safety monitor disabled. '
+                'Build with: cd openhands-agolos && maturin develop'
             )
             self._monitor = None
             return
@@ -35,7 +37,7 @@ class SafetyMonitor:
 
         # Add default safety rules
         self._add_default_rules()
-        logger.info("Safety monitor initialized with LTL verification")
+        logger.info('Safety monitor initialized with LTL verification')
 
     def _add_default_rules(self):
         """Add default safety properties."""
@@ -44,16 +46,16 @@ class SafetyMonitor:
 
         # Block dangerous root deletion patterns
         self._monitor.add_pattern_rule(
-            "no_root_deletion",
-            "Prevent deletion of root or critical system directories",
-            r"rm\s+(-[rf]+\s+)*/"
+            'no_root_deletion',
+            'Prevent deletion of root or critical system directories',
+            r'rm\s+(-[rf]+\s+)*/',
         )
 
         # Block recursive force removal of important dirs
         self._monitor.add_pattern_rule(
-            "no_force_recursive_root",
-            "Prevent rm -rf on root directory",
-            r"rm\s+-[rf]+(f|r)\s+/"
+            'no_force_recursive_root',
+            'Prevent rm -rf on root directory',
+            r'rm\s+-[rf]+(f|r)\s+/',
         )
 
     def check_command(self, command: str) -> Optional[str]:
@@ -71,7 +73,7 @@ class SafetyMonitor:
         violations = self._monitor.check_command(command)
         if violations:
             # Return first violation description
-            return f"Safety violation: {violations[0].description}"
+            return f'Safety violation: {violations[0].description}'
 
         return None
 

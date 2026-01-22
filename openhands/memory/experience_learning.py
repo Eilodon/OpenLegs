@@ -4,15 +4,18 @@ Provides Python wrappers around Rust ExperienceBuffer and PatternMiner
 for learning from past actions and discovering successful action patterns.
 """
 
-from typing import List, Optional
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 # Try to import Rust bindings
 try:
     import openhands_agolos as ag
-    LEARNING_AVAILABLE = hasattr(ag, 'PyExperienceBuffer') and hasattr(ag, 'PyPatternMiner')
+
+    LEARNING_AVAILABLE = hasattr(ag, 'PyExperienceBuffer') and hasattr(
+        ag, 'PyPatternMiner'
+    )
 except ImportError:
     LEARNING_AVAILABLE = False
     ag = None
@@ -41,12 +44,16 @@ class ExperienceBuffer:
         if LEARNING_AVAILABLE and ag is not None:
             try:
                 self._buffer = ag.PyExperienceBuffer(max_size)
-                logger.info(f"ExperienceBuffer: Rust backend initialized (max_size={max_size})")
+                logger.info(
+                    f'ExperienceBuffer: Rust backend initialized (max_size={max_size})'
+                )
             except Exception as e:
-                logger.warning(f"ExperienceBuffer: Failed to init Rust backend: {e}")
+                logger.warning(f'ExperienceBuffer: Failed to init Rust backend: {e}')
         else:
-            logger.warning("ExperienceBuffer: Rust backend not available, using fallback")
-            self._fallback_buffer: List[dict] = []
+            logger.warning(
+                'ExperienceBuffer: Rust backend not available, using fallback'
+            )
+            self._fallback_buffer: list[dict] = []
             self._max_size = max_size
 
     def push(
@@ -54,7 +61,7 @@ class ExperienceBuffer:
         action_type: str,
         action_signature: str,
         success: bool,
-        reward: float = 0.0
+        reward: float = 0.0,
     ) -> None:
         """Push a new experience to the buffer.
 
@@ -70,12 +77,14 @@ class ExperienceBuffer:
             # Fallback implementation
             if len(self._fallback_buffer) >= self._max_size:
                 self._fallback_buffer.pop(0)
-            self._fallback_buffer.append({
-                "action_type": action_type,
-                "signature": action_signature,
-                "success": success,
-                "reward": reward,
-            })
+            self._fallback_buffer.append(
+                {
+                    'action_type': action_type,
+                    'signature': action_signature,
+                    'success': success,
+                    'reward': reward,
+                }
+            )
 
     def get_success_rate(self, action_type: str) -> Optional[float]:
         """Get success rate for a specific action type.
@@ -90,10 +99,12 @@ class ExperienceBuffer:
             return self._buffer.success_rate(action_type)
         else:
             # Fallback implementation
-            matching = [e for e in self._fallback_buffer if e["action_type"] == action_type]
+            matching = [
+                e for e in self._fallback_buffer if e['action_type'] == action_type
+            ]
             if not matching:
                 return None
-            success_count = sum(1 for e in matching if e["success"])
+            success_count = sum(1 for e in matching if e['success'])
             return success_count / len(matching)
 
     def __len__(self) -> int:
@@ -131,13 +142,15 @@ class PatternMiner:
 
         if LEARNING_AVAILABLE and ag is not None:
             try:
-                self._miner = ag.PyPatternMiner.with_params(min_support, max_pattern_length)
-                logger.info(f"PatternMiner: Rust backend initialized")
+                self._miner = ag.PyPatternMiner.with_params(
+                    min_support, max_pattern_length
+                )
+                logger.info('PatternMiner: Rust backend initialized')
             except Exception as e:
-                logger.warning(f"PatternMiner: Failed to init Rust backend: {e}")
+                logger.warning(f'PatternMiner: Failed to init Rust backend: {e}')
         else:
-            logger.warning("PatternMiner: Rust backend not available, using fallback")
-            self._fallback_actions: List[dict] = []
+            logger.warning('PatternMiner: Rust backend not available, using fallback')
+            self._fallback_actions: list[dict] = []
             self._max_pattern_length = max_pattern_length
 
     def add_action(self, action_type: str, success: bool, reward: float = 0.0) -> None:
@@ -151,13 +164,15 @@ class PatternMiner:
         if self._miner is not None:
             self._miner.add_action(action_type, success, reward)
         else:
-            self._fallback_actions.append({
-                "type": action_type,
-                "success": success,
-                "reward": reward,
-            })
+            self._fallback_actions.append(
+                {
+                    'type': action_type,
+                    'success': success,
+                    'reward': reward,
+                }
+            )
 
-    def suggest_next(self, recent_actions: List[str]) -> Optional[str]:
+    def suggest_next(self, recent_actions: list[str]) -> Optional[str]:
         """Suggest next action based on current sequence.
 
         Args:
@@ -170,10 +185,11 @@ class PatternMiner:
             return self._miner.suggest_next(recent_actions)
         else:
             # Simple fallback: return most common successful action
-            successful = [a["type"] for a in self._fallback_actions if a["success"]]
+            successful = [a['type'] for a in self._fallback_actions if a['success']]
             if not successful:
                 return None
             from collections import Counter
+
             most_common = Counter(successful).most_common(1)
             return most_common[0][0] if most_common else None
 

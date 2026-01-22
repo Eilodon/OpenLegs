@@ -6,6 +6,7 @@ from openhands.security.llm.analyzer import LLMRiskAnalyzer
 # Optional: Pandora analyzer (requires openhands_agolos Rust extension)
 try:
     from openhands.security.pandora.analyzer import PandoraSecurityAnalyzer
+
     PANDORA_AVAILABLE = True
 except ImportError:
     PANDORA_AVAILABLE = False

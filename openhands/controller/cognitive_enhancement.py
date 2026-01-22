@@ -5,7 +5,7 @@ to enhance agent reasoning and recall.
 """
 
 import time
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Optional
 
 from openhands.core.logger import openhands_logger as logger
 
@@ -15,13 +15,16 @@ if TYPE_CHECKING:
 
 # Try to import cognitive modules
 try:
-    from openhands.memory.holographic_memory import HolographicMemory, HOLOGRAPHIC_AVAILABLE
+    from openhands.memory.holographic_memory import (
+        HOLOGRAPHIC_AVAILABLE,
+        HolographicMemory,
+    )
 except ImportError:
     HOLOGRAPHIC_AVAILABLE = False
     HolographicMemory = None
 
 try:
-    from openhands.memory.causal_analyzer import CausalAnalyzer, DAGMA_AVAILABLE
+    from openhands.memory.causal_analyzer import DAGMA_AVAILABLE, CausalAnalyzer
 except ImportError:
     DAGMA_AVAILABLE = False
     CausalAnalyzer = None
@@ -62,7 +65,7 @@ class CognitiveEnhancementMixin:
         """
         self._cognitive_memory: Optional[HolographicMemory] = None
         self._cognitive_analyzer: Optional[CausalAnalyzer] = None
-        self._action_history: List[Dict[str, Any]] = []
+        self._action_history: list[dict[str, Any]] = []
         self._last_action_time_ms: float = 0
         self._total_overhead_ms: float = 0
         self._step_count: int = 0
@@ -73,19 +76,19 @@ class CognitiveEnhancementMixin:
                 self._cognitive_memory = HolographicMemory(
                     dim=memory_dim, max_items=memory_max_items
                 )
-                logger.info("CognitiveEnhancement: HolographicMemory enabled")
+                logger.info('CognitiveEnhancement: HolographicMemory enabled')
             except Exception as e:
-                logger.warning(f"CognitiveEnhancement: Failed to init memory: {e}")
+                logger.warning(f'CognitiveEnhancement: Failed to init memory: {e}')
 
         # Initialize causal analyzer
         if enable_causal and DAGMA_AVAILABLE:
             try:
-                self._cognitive_analyzer = CausalAnalyzer(mode="fast")
-                logger.info("CognitiveEnhancement: CausalAnalyzer enabled")
+                self._cognitive_analyzer = CausalAnalyzer(mode='fast')
+                logger.info('CognitiveEnhancement: CausalAnalyzer enabled')
             except Exception as e:
-                logger.warning(f"CognitiveEnhancement: Failed to init analyzer: {e}")
+                logger.warning(f'CognitiveEnhancement: Failed to init analyzer: {e}')
 
-    def on_action_start(self, action: "Action", context: str = "") -> Optional[str]:
+    def on_action_start(self, action: 'Action', context: str = '') -> Optional[str]:
         """Called before an action is executed.
 
         Can provide suggestions based on past experiences.
@@ -106,20 +109,20 @@ class CognitiveEnhancementMixin:
                 if result:
                     similarity, recalled_solution = result
                     if similarity > 0.5:  # Only suggest for strong matches
-                        suggestion = f"Similar past scenario (similarity={similarity:.1%}): {recalled_solution}"
-                        logger.debug(f"CognitiveEnhancement: Found similar experience")
+                        suggestion = f'Similar past scenario (similarity={similarity:.1%}): {recalled_solution}'
+                        logger.debug('CognitiveEnhancement: Found similar experience')
             except Exception as e:
-                logger.debug(f"CognitiveEnhancement: Memory recall error: {e}")
+                logger.debug(f'CognitiveEnhancement: Memory recall error: {e}')
 
         self._last_action_time_ms = (time.perf_counter() - start_time) * 1000
         return suggestion
 
     def on_action_success(
         self,
-        action: "Action",
-        observation: "Observation",
-        context: str = "",
-        solution: str = "",
+        action: 'Action',
+        observation: 'Observation',
+        context: str = '',
+        solution: str = '',
     ) -> None:
         """Called when an action succeeds.
 
@@ -137,25 +140,27 @@ class CognitiveEnhancementMixin:
         if self._cognitive_memory and context and solution:
             try:
                 self._cognitive_memory.store_experience(context, solution)
-                logger.debug("CognitiveEnhancement: Stored successful experience")
+                logger.debug('CognitiveEnhancement: Stored successful experience')
             except Exception as e:
-                logger.debug(f"CognitiveEnhancement: Memory store error: {e}")
+                logger.debug(f'CognitiveEnhancement: Memory store error: {e}')
 
         # Record for causal analysis
-        self._action_history.append({
-            "action_type": type(action).__name__,
-            "success": True,
-            "timestamp": time.time(),
-        })
+        self._action_history.append(
+            {
+                'action_type': type(action).__name__,
+                'success': True,
+                'timestamp': time.time(),
+            }
+        )
 
         self._total_overhead_ms += (time.perf_counter() - start_time) * 1000
         self._step_count += 1
 
     def on_action_failure(
         self,
-        action: "Action",
-        observation: "Observation",
-        error: str = "",
+        action: 'Action',
+        observation: 'Observation',
+        error: str = '',
     ) -> Optional[str]:
         """Called when an action fails.
 
@@ -173,12 +178,14 @@ class CognitiveEnhancementMixin:
         suggestion = None
 
         # Record for causal analysis
-        self._action_history.append({
-            "action_type": type(action).__name__,
-            "success": False,
-            "error": error[:100] if error else "",
-            "timestamp": time.time(),
-        })
+        self._action_history.append(
+            {
+                'action_type': type(action).__name__,
+                'success': False,
+                'error': error[:100] if error else '',
+                'timestamp': time.time(),
+            }
+        )
 
         # Try to find similar past solutions
         if self._cognitive_memory and error:
@@ -186,9 +193,9 @@ class CognitiveEnhancementMixin:
                 result = self._cognitive_memory.recall_similar(error, threshold=0.2)
                 if result:
                     similarity, recalled_solution = result
-                    suggestion = f"Past solution for similar error: {recalled_solution}"
+                    suggestion = f'Past solution for similar error: {recalled_solution}'
             except Exception as e:
-                logger.debug(f"CognitiveEnhancement: Memory recall error: {e}")
+                logger.debug(f'CognitiveEnhancement: Memory recall error: {e}')
 
         self._total_overhead_ms += (time.perf_counter() - start_time) * 1000
         self._step_count += 1
@@ -197,8 +204,8 @@ class CognitiveEnhancementMixin:
 
     def analyze_failure_pattern(
         self,
-        variables: Dict[str, float],
-        failure_var: str = "success",
+        variables: dict[str, float],
+        failure_var: str = 'success',
     ) -> Optional[str]:
         """Analyze the causal pattern of recent failures.
 
@@ -213,18 +220,20 @@ class CognitiveEnhancementMixin:
             return None
 
         try:
-            explanation = self._cognitive_analyzer.explain_failure(variables, failure_var)
+            explanation = self._cognitive_analyzer.explain_failure(
+                variables, failure_var
+            )
             return explanation
         except Exception as e:
-            logger.debug(f"CognitiveEnhancement: Causal analysis error: {e}")
+            logger.debug(f'CognitiveEnhancement: Causal analysis error: {e}')
             return None
 
     def predict_intervention(
         self,
-        current_state: Dict[str, float],
+        current_state: dict[str, float],
         change_var: str,
         new_value: float,
-    ) -> Optional[Dict[str, float]]:
+    ) -> Optional[dict[str, float]]:
         """Predict what would happen if we change a variable.
 
         Answers counterfactual questions like "What if file permissions were fixed?"
@@ -253,10 +262,10 @@ class CognitiveEnhancementMixin:
             )
             return dict(zip(var_names, predicted)) if predicted else None
         except Exception as e:
-            logger.debug(f"CognitiveEnhancement: Intervention error: {e}")
+            logger.debug(f'CognitiveEnhancement: Intervention error: {e}')
             return None
 
-    def get_performance_stats(self) -> Dict[str, float]:
+    def get_performance_stats(self) -> dict[str, float]:
         """Get performance statistics for cognitive operations.
 
         Returns:
@@ -264,18 +273,22 @@ class CognitiveEnhancementMixin:
         """
         avg = self._total_overhead_ms / self._step_count if self._step_count > 0 else 0
         return {
-            "total_overhead_ms": self._total_overhead_ms,
-            "avg_overhead_per_step_ms": avg,
-            "step_count": self._step_count,
-            "memory_items": self._cognitive_memory.item_count() if self._cognitive_memory else 0,
-            "memory_energy": self._cognitive_memory.energy() if self._cognitive_memory else 0,
+            'total_overhead_ms': self._total_overhead_ms,
+            'avg_overhead_per_step_ms': avg,
+            'step_count': self._step_count,
+            'memory_items': self._cognitive_memory.item_count()
+            if self._cognitive_memory
+            else 0,
+            'memory_energy': self._cognitive_memory.energy()
+            if self._cognitive_memory
+            else 0,
         }
 
     def clear_memory(self) -> None:
         """Clear all stored memories."""
         if self._cognitive_memory:
             self._cognitive_memory.clear()
-            logger.info("CognitiveEnhancement: Memory cleared")
+            logger.info('CognitiveEnhancement: Memory cleared')
 
 
 def enhance_agent(agent, **kwargs) -> None:
@@ -294,7 +307,9 @@ def enhance_agent(agent, **kwargs) -> None:
     agent._step_count = mixin._step_count
 
     # Bind methods
-    agent.on_action_start = lambda action, context="": mixin.on_action_start(action, context)
+    agent.on_action_start = lambda action, context='': mixin.on_action_start(
+        action, context
+    )
     agent.on_action_success = mixin.on_action_success
     agent.on_action_failure = mixin.on_action_failure
     agent.analyze_failure_pattern = mixin.analyze_failure_pattern
@@ -302,7 +317,7 @@ def enhance_agent(agent, **kwargs) -> None:
     agent.get_performance_stats = mixin.get_performance_stats
     agent.clear_memory = mixin.clear_memory
 
-    logger.info(f"CognitiveEnhancement: Enhanced agent {type(agent).__name__}")
+    logger.info(f'CognitiveEnhancement: Enhanced agent {type(agent).__name__}')
 
 
 # Export status

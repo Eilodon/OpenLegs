@@ -5,13 +5,14 @@ Enables agents to recall past solutions by similarity rather than exact match.
 """
 
 import hashlib
-from typing import List, Optional, Tuple
+from typing import Optional
 
 from openhands.core.logger import openhands_logger as logger
 
 # Try to import the Rust extension
 try:
     import openhands_agolos
+
     AGOLOS_AVAILABLE = True
     # Check if HolographicMemory feature is enabled
     HOLOGRAPHIC_AVAILABLE = hasattr(openhands_agolos, 'PyHolographicMemory')
@@ -59,22 +60,26 @@ class HolographicMemory:
         """
         if not HOLOGRAPHIC_AVAILABLE:
             raise ImportError(
-                "PyHolographicMemory is not available. "
-                "Build with: cd openhands-agolos && maturin develop --features full"
+                'PyHolographicMemory is not available. '
+                'Build with: cd openhands-agolos && maturin develop --features full'
             )
 
         self.dim = dim
         self.max_items = max_items
-        self._memory = openhands_agolos.PyHolographicMemory.with_capacity(dim, max_items)
+        self._memory = openhands_agolos.PyHolographicMemory.with_capacity(
+            dim, max_items
+        )
         self._text_cache: dict[str, str] = {}  # hash -> original text
-        logger.debug(f"HolographicMemory initialized (dim={dim}, max_items={max_items})")
+        logger.debug(
+            f'HolographicMemory initialized (dim={dim}, max_items={max_items})'
+        )
 
     @classmethod
-    def default_for_agent(cls) -> "HolographicMemory":
+    def default_for_agent(cls) -> 'HolographicMemory':
         """Create default memory configuration for agents."""
         return cls(dim=512, max_items=10000)
 
-    def _text_to_embedding(self, text: str) -> List[float]:
+    def _text_to_embedding(self, text: str) -> list[float]:
         """Convert text to embedding vector using simple hash-based method.
 
         For production, replace with actual embedding model (OpenAI, sentence-transformers).
@@ -97,7 +102,7 @@ class HolographicMemory:
 
             # 3-gram contribution
             if i + 3 <= len(text):
-                trigram = text[i:i+3]
+                trigram = text[i : i + 3]
                 h = int(hashlib.md5(trigram.encode()).hexdigest()[:8], 16)
                 embedding[h % self.dim] += 0.5
 
@@ -128,13 +133,13 @@ class HolographicMemory:
         key_hash = hashlib.md5(context.encode()).hexdigest()[:16]
         self._text_cache[key_hash] = solution
 
-        logger.debug(f"Stored experience: {context[:50]}... -> {solution[:50]}...")
+        logger.debug(f'Stored experience: {context[:50]}... -> {solution[:50]}...')
 
     def recall_similar(
         self,
         query: str,
         threshold: float = 0.3,
-    ) -> Optional[Tuple[float, str]]:
+    ) -> Optional[tuple[float, str]]:
         """Recall a solution by similar context.
 
         Args:
@@ -170,7 +175,7 @@ class HolographicMemory:
 
         return None
 
-    def recall_vector(self, query: str) -> List[float]:
+    def recall_vector(self, query: str) -> list[float]:
         """Recall raw embedding vector for a query.
 
         Lower-level API for advanced use cases.
@@ -190,7 +195,7 @@ class HolographicMemory:
         """Clear all memory."""
         self._memory.clear()
         self._text_cache.clear()
-        logger.info("HolographicMemory cleared")
+        logger.info('HolographicMemory cleared')
 
     def item_count(self) -> int:
         """Get number of items stored."""
@@ -200,7 +205,7 @@ class HolographicMemory:
         """Get current energy of memory trace."""
         return self._memory.energy()
 
-    def capacity_status(self) -> Tuple[int, int]:
+    def capacity_status(self) -> tuple[int, int]:
         """Get capacity status (items_stored, max_items)."""
         return self._memory.capacity_status()
 
@@ -211,6 +216,6 @@ def create_agent_memory() -> HolographicMemory:
     if not HOLOGRAPHIC_AVAILABLE:
         raise ImportError(
             "HolographicMemory requires openhands_agolos with 'full' feature. "
-            "Build with: cd openhands-agolos && maturin develop --features full"
+            'Build with: cd openhands-agolos && maturin develop --features full'
         )
     return HolographicMemory.default_for_agent()

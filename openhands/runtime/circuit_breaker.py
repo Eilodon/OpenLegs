@@ -2,11 +2,13 @@
 
 Provides Python-friendly interface to the Rust-based circuit breaker.
 """
+
 import logging
 from typing import Optional
 
 try:
     from openhands_agolos import PyCircuitBreaker
+
     CIRCUIT_BREAKER_AVAILABLE = True
 except ImportError:
     CIRCUIT_BREAKER_AVAILABLE = False
@@ -48,8 +50,8 @@ class CircuitBreaker:
         """
         if not CIRCUIT_BREAKER_AVAILABLE:
             logger.warning(
-                "openhands_agolos not available. Circuit breaker disabled. "
-                "Build with: cd openhands-agolos && maturin develop"
+                'openhands_agolos not available. Circuit breaker disabled. '
+                'Build with: cd openhands-agolos && maturin develop'
             )
             self._inner = None
             return
@@ -60,8 +62,8 @@ class CircuitBreaker:
             half_open_permits=half_open_permits,
         )
         logger.info(
-            f"Circuit breaker initialized: threshold={failure_threshold}, "
-            f"timeout={recovery_timeout_secs}s"
+            f'Circuit breaker initialized: threshold={failure_threshold}, '
+            f'timeout={recovery_timeout_secs}s'
         )
 
     def is_open(self, operation: str) -> bool:
@@ -118,16 +120,16 @@ class CircuitBreaker:
         """
         if self._inner is None:
             return {
-                "total_operations": 0,
-                "open_circuits": 0,
-                "closed_circuits": 0,
-                "half_open_circuits": 0,
+                'total_operations': 0,
+                'open_circuits': 0,
+                'closed_circuits': 0,
+                'half_open_circuits': 0,
             }
 
         stats = self._inner.stats()
         return {
-            "total_operations": stats.total_operations,
-            "open_circuits": stats.open_circuits,
-            "closed_circuits": stats.closed_circuits,
-            "half_open_circuits": stats.half_open_circuits,
+            'total_operations': stats.total_operations,
+            'open_circuits': stats.open_circuits,
+            'closed_circuits': stats.closed_circuits,
+            'half_open_circuits': stats.half_open_circuits,
         }

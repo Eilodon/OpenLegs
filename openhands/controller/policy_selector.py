@@ -5,15 +5,15 @@ calculator for intelligent action selection based on goal alignment
 and uncertainty.
 """
 
-from dataclasses import dataclass
-from typing import Optional
 import logging
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
 # Try to import Rust bindings
 try:
     import openhands_agolos as ag
+
     POLICY_AVAILABLE = True
 except ImportError:
     POLICY_AVAILABLE = False
@@ -23,6 +23,7 @@ except ImportError:
 @dataclass
 class PolicyDecision:
     """Result of policy selection."""
+
     policy: str  # Execute, RequestConfirmation, Skip, Fallback, Explore
     efe_value: float  # Expected Free Energy (lower = better)
     pragmatic_value: float  # Goal alignment component
@@ -30,15 +31,15 @@ class PolicyDecision:
 
     @property
     def requires_confirmation(self) -> bool:
-        return self.policy == "RequestConfirmation"
+        return self.policy == 'RequestConfirmation'
 
     @property
     def should_skip(self) -> bool:
-        return self.policy == "Skip"
+        return self.policy == 'Skip'
 
     @property
     def should_explore(self) -> bool:
-        return self.policy == "Explore"
+        return self.policy == 'Explore'
 
 
 class PolicySelector:
@@ -68,12 +69,14 @@ class PolicySelector:
         if POLICY_AVAILABLE and ag is not None:
             try:
                 self._selector = ag.PolicySelector()
-                self._efe_calc = ag.EFECalculator.with_params(temperature, epistemic_weight)
-                logger.info("PolicySelector: Rust backend initialized")
+                self._efe_calc = ag.EFECalculator.with_params(
+                    temperature, epistemic_weight
+                )
+                logger.info('PolicySelector: Rust backend initialized')
             except Exception as e:
-                logger.warning(f"PolicySelector: Failed to init Rust backend: {e}")
+                logger.warning(f'PolicySelector: Failed to init Rust backend: {e}')
         else:
-            logger.warning("PolicySelector: Rust backend not available, using fallback")
+            logger.warning('PolicySelector: Rust backend not available, using fallback')
 
     def select_action(
         self,
@@ -93,15 +96,17 @@ class PolicySelector:
         """
         if self._selector is not None:
             try:
-                eval_result = self._selector.select(action_type, goal_alignment, uncertainty)
+                eval_result = self._selector.select(
+                    action_type, goal_alignment, uncertainty
+                )
                 return PolicyDecision(
-                    policy=eval_result.policy.replace("ActionPolicy::", ""),
+                    policy=eval_result.policy.replace('ActionPolicy::', ''),
                     efe_value=eval_result.efe_value,
                     pragmatic_value=eval_result.pragmatic,
                     epistemic_value=eval_result.epistemic,
                 )
             except Exception as e:
-                logger.warning(f"PolicySelector: Rust selection failed: {e}")
+                logger.warning(f'PolicySelector: Rust selection failed: {e}')
 
         # Fallback Python implementation
         return self._fallback_select(action_type, goal_alignment, uncertainty)
@@ -121,15 +126,15 @@ class PolicySelector:
         efe = -(0.7 * pragmatic + 0.3 * epistemic)
 
         if goal_alignment < 0.2:
-            policy = "Skip"
+            policy = 'Skip'
         elif uncertainty > 0.8:
-            policy = "Explore"
+            policy = 'Explore'
         elif success_rate < 0.3:
-            policy = "Fallback"
+            policy = 'Fallback'
         elif goal_alignment > 0.8 and success_rate > 0.7:
-            policy = "Execute"
+            policy = 'Execute'
         else:
-            policy = "RequestConfirmation"
+            policy = 'RequestConfirmation'
 
         return PolicyDecision(
             policy=policy,
@@ -152,7 +157,7 @@ class PolicySelector:
                 self._selector.record_outcome(action_type, success)
                 return
             except Exception as e:
-                logger.warning(f"PolicySelector: Failed to record outcome: {e}")
+                logger.warning(f'PolicySelector: Failed to record outcome: {e}')
 
         # Fallback: update local success rates
         if action_type not in self._action_success_rates:
@@ -179,4 +184,4 @@ def should_execute(action_type: str, goal_alignment: float, uncertainty: float) 
     """Quick check if action should be executed without confirmation."""
     selector = PolicySelector()
     decision = selector.select_action(action_type, goal_alignment, uncertainty)
-    return decision.policy == "Execute"
+    return decision.policy == 'Execute'
